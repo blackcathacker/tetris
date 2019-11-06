@@ -2,8 +2,8 @@ const axios = require('axios')
 const opn = require('opn')
 const BASE_URL = 'http://393d049b.ngrok.io'
 const GUI_URL = 'https://tetris.picante.monster'
-const { PIECE_MASK, PIECE_MASK_90, PIECE_MASK_180, PIECE_MASK_270, transformMask} = require('./pieces.js')
-const rotations = [PIECE_MASK, PIECE_MASK_90, PIECE_MASK_180, PIECE_MASK_270]
+const { rotations, transformMask} = require('./pieces.js')
+const { cloneDeep, maxBy, minBy } = require('lodash')
 ;(function () {
   let gameId = process.env.GAME_ID
   async function run() {
@@ -14,7 +14,6 @@ const rotations = [PIECE_MASK, PIECE_MASK_90, PIECE_MASK_180, PIECE_MASK_270]
       let state = await joinGame()
       openBrowser()
       while (true) {
-        const piece = PIECE_MASK_90[state.current_piece]
         state = await placePiece(state, nextOffset(getBoard(state), state.current_piece), gameId)
       }
   }
@@ -25,30 +24,70 @@ const rotations = [PIECE_MASK, PIECE_MASK_90, PIECE_MASK_180, PIECE_MASK_270]
     }
   }
 
-  function nextOffset(board, currentPiece) {
-      for (let row = 0; row < board.length; row++) {
-          for (let col = 0; col < board[row].length; col++) {
-              for (let rot = 0; rot < rotations.length; rot++) {
-                if (validateMove(rotations[rot][currentPiece], board, { row, col })) {
-                    return {
-                        row,
-                        col,
-                        rot
+  function findBestOffset(board, currentPiece) {
+    
+  }
+
+  function updateBoard(board, currentPiece, offset) {
+    const locs = transformOffset(rotations[offset.rot][currentPiece], offset)
+    const newBoard = cloneDeep(board)
+    locs.forEach(l => newBoard[l.row][l.col] = 'X')
+    return newBoard
+  }
+
+  function scoreBoard(newBoard) {
+      let score = 0
+      for (let y = 1; y < newBoard.length; y++) {
+          for (let x = 0; x < newBoard[y].length; x++) {
+              if (newBoard[y][x]) {
+                for (let yPrime = y - 1; yPrime >= 0; yPrime--) {
+                    if (!newBoard[yPrime][x]) {
+                        score--
                     }
                 }
             }
           }
       }
-      return {
-          row: 0,
-          col: 20,
-          rot: 0
+      return score
+  }
+
+  function nextOffset(board, currentPiece, initialRow = 0, initialCol = 0) {
+      const possibleMoves = []
+      for (let row = initialRow; row < board.length; row++) {
+          for (let col = initialCol; col < board[row].length; col++) {
+              for (let rot = 0; rot < rotations.length; rot++) {
+                if (validateMove(rotations[rot][currentPiece], board, { row, col })) {
+                    const newBoard = updateBoard(board, currentPiece, {
+                        row,
+                        col,
+                        rot
+                    })
+                    possibleMoves.push({
+                        row,
+                        col,
+                        rot,
+                        score: scoreBoard(newBoard)
+                    })
+                }
+            }
+          }
+      }
+      if (possibleMoves.length > 0) {
+          //console.log('MOVES', possibleMoves)
+          return maxBy(possibleMoves, 'score')
+      } else {
+        return {
+            row: 0,
+            col: 20,
+            rot: 0
+        }
       }
   }
 
   function validateMove(pieceMask, board, offset) {
     const height = board.length
     const width = board[0].length
+    let touching = offset.row === 0
     for (let y = 0; y < pieceMask.length; y++) {
       for (let x = 0; x < pieceMask[y].length; x++) {
         if (pieceMask[y][x]) {
@@ -60,10 +99,13 @@ const rotations = [PIECE_MASK, PIECE_MASK_90, PIECE_MASK_180, PIECE_MASK_270]
           for (let yPrime = posY; yPrime < height; yPrime++) {
             if (board[yPrime][posX]) return false
           }
+          if (posY > 0 && board[posY-1][posX]) {
+              touching = true
+          }
         }
       }
     }
-    return true
+    return touching
   }
   
   function getBoard({players, playerId}) {
@@ -85,7 +127,7 @@ const rotations = [PIECE_MASK, PIECE_MASK_90, PIECE_MASK_180, PIECE_MASK_270]
   async function createGame() {
       const resp = await axios.post(BASE_URL, 
         {
-          "seats": 2,
+          "seats": 1,
           "turns": 100,
           "initial_garbage": 0
         })
@@ -93,7 +135,6 @@ const rotations = [PIECE_MASK, PIECE_MASK_90, PIECE_MASK_180, PIECE_MASK_270]
   }
 
   async function placePiece({current_piece, nextTurnToken, playerId}, offset, gameId) {
-    console.log(current_piece, rotations[offset.rot])
     const resp = await axios.post(`${BASE_URL}${gameId}/moves`, {
       locations: transformOffset(rotations[offset.rot][current_piece], offset)
     }, { headers: { 'x-turn-token': nextTurnToken }})
