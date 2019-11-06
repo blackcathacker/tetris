@@ -3,20 +3,19 @@ const opn = require('opn')
 const BASE_URL = 'http://393d049b.ngrok.io'
 const GUI_URL = 'https://tetris.picante.monster'
 const { PIECE_MASK, PIECE_MASK_90, PIECE_MASK_180, PIECE_MASK_270, transformMask} = require('./pieces.js')
-
+const rotations = [PIECE_MASK, PIECE_MASK_90, PIECE_MASK_180, PIECE_MASK_270]
 ;(function () {
   let gameId = process.env.GAME_ID
   async function run() {
       if (!gameId) {
           gameId = await createGame()
       }
+      console.log('Game ID', gameId)
       let state = await joinGame()
       openBrowser()
       while (true) {
         const piece = PIECE_MASK_90[state.current_piece]
-        console.log([...getBoard(state)].reverse())
-        console.log(state.current_piece, nextOffset(getBoard(state), piece))
-        state = await placePiece({...state, pieceMask: piece}, nextOffset(getBoard(state), piece), gameId)
+        state = await placePiece(state, nextOffset(getBoard(state), state.current_piece), gameId)
       }
   }
 
@@ -29,13 +28,21 @@ const { PIECE_MASK, PIECE_MASK_90, PIECE_MASK_180, PIECE_MASK_270, transformMask
   function nextOffset(board, currentPiece) {
       for (let row = 0; row < board.length; row++) {
           for (let col = 0; col < board[row].length; col++) {
-              if (validateMove(currentPiece, board, { row, col })) {
-                  return {
-                      row,
-                      col
-                  }
-              }
+              for (let rot = 0; rot < rotations.length; rot++) {
+                if (validateMove(rotations[rot][currentPiece], board, { row, col })) {
+                    return {
+                        row,
+                        col,
+                        rot
+                    }
+                }
+            }
           }
+      }
+      return {
+          row: 0,
+          col: 20,
+          rot: 0
       }
   }
 
@@ -78,17 +85,17 @@ const { PIECE_MASK, PIECE_MASK_90, PIECE_MASK_180, PIECE_MASK_270, transformMask
   async function createGame() {
       const resp = await axios.post(BASE_URL, 
         {
-          "seats": 1,
+          "seats": 2,
           "turns": 100,
           "initial_garbage": 0
         })
       return resp.headers.location
   }
 
-  async function placePiece({current_piece, nextTurnToken, playerId, pieceMask}, offset, gameId) {
-    console.log(current_piece)
+  async function placePiece({current_piece, nextTurnToken, playerId}, offset, gameId) {
+    console.log(current_piece, rotations[offset.rot])
     const resp = await axios.post(`${BASE_URL}${gameId}/moves`, {
-      locations: transformOffset(pieceMask, offset)
+      locations: transformOffset(rotations[offset.rot][current_piece], offset)
     }, { headers: { 'x-turn-token': nextTurnToken }})
     return {
         ...resp.data,
@@ -100,21 +107,6 @@ const { PIECE_MASK, PIECE_MASK_90, PIECE_MASK_180, PIECE_MASK_270, transformMask
   function transformOffset(piece, offset) {
       return transformMask(piece).map(l => ({ row: l.row + offset.row, col: l.col + offset.col }))
   }
-
-  function rotate(piece) {
-       const reversed = [...piece].reverse()
-       // swap the symmetric elements
-       for (var i = 0; i < reversed.length; i++) {
-         for (var j = 0; j < i; j++) {
-           var temp = reversed[i][j];
-           reversed[i][j] = reversed[j][i];
-           reversed[j][i] = temp;
-         }
-       }
-       console.log(reversed)
-       return reversed
-  }
-
 
   run().then(() => console.log('finished')).catch(err => console.log(err))
 })();
